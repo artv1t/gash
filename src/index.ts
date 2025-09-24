@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   eventBus.onTokenDetected(async (tokenEvent) => {
     const result = await preFilter.processToken(tokenEvent.mintAddress);
     const status = result.passed ? '✅ PASSED' : '❌ REJECTED';
-    console.log(`${status} ${tokenEvent.mintAddress.slice(0, 20)}... (${result.checksPassed}/${result.checksTotal} checks)`);
+    console.log(`📊 PRE-FILTER EXIT: ${status} ${tokenEvent.mintAddress.slice(0, 20)}... (${result.checksPassed}/${result.checksTotal} checks)`);
     if (!result.passed) {
       console.log(`  └─ Failed at: ${result.failedAt} - ${result.reason}`);
     }

@@ -53,7 +53,7 @@ function getBooleanEnv(key: string, defaultValue: boolean): boolean {
 
 export const config: Config = {
   rpc: {
-    heliusUrl: getOptionalEnv('HELIUS_RPC_URL', 'https://api.mainnet-beta.solana.com'),
+    heliusUrl: getOptionalEnv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com/?api-key=7c8922d6-1031-42c1-b4ee-bf5daa29abd4'),
     backupUrl: getOptionalEnv('BACKUP_RPC_URL', 'https://api.mainnet-beta.solana.com'),
     timeout: getNumberEnv('RPC_TIMEOUT', 5000),
     maxCallsPerSecond: getNumberEnv('MAX_RPC_CALLS_PER_SECOND', 100),

@@ -78,15 +78,19 @@ export class TokenDetector {
       for (const transaction of block.transactions) {
         if (transaction.meta?.err) continue;
         
-        const accountKeys = transaction.transaction.message.getAccountKeys();
-        for (let i = 0; i < accountKeys.length; i++) {
-          const key = accountKeys.get(i);
-          if (key) {
-            const address = key.toString();
-            if (this.isValidMintAddress(address)) {
-              tokens.push(address);
+        try {
+          const accountKeys = transaction.transaction.message.getAccountKeys();
+          for (let i = 0; i < accountKeys.length; i++) {
+            const key = accountKeys.get(i);
+            if (key) {
+              const address = key.toString();
+              if (this.isValidMintAddress(address)) {
+                tokens.push(address);
+              }
             }
           }
+        } catch (keyError) {
+          continue;
         }
       }
       
