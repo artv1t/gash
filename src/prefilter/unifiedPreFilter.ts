@@ -31,7 +31,7 @@ export class UnifiedPreFilter {
     this.logger.incrementInput();
     
     let checksPassed = 0;
-    const checksTotal = 16;
+    const checksTotal = 8; // Only 8 real pre-filters (no RPC)
 
     if (!this.check1_length(mintAddress)) {
       this.logger.incrementRejected('check1_length');
@@ -89,62 +89,6 @@ export class UnifiedPreFilter {
     this.logger.incrementPassed('check8_zero');
     checksPassed++;
 
-    if (!this.check9_liquidity(mintAddress)) {
-      this.logger.incrementRejected('check9_liquidity');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check9_liquidity', reason: 'Poor liquidity pattern' };
-    }
-    this.logger.incrementPassed('check9_liquidity');
-    checksPassed++;
-
-    if (!this.check10_holder(mintAddress)) {
-      this.logger.incrementRejected('check10_holder');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check10_holder', reason: 'Poor holder distribution' };
-    }
-    this.logger.incrementPassed('check10_holder');
-    checksPassed++;
-
-    if (!this.check11_contract(mintAddress)) {
-      this.logger.incrementRejected('check11_contract');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check11_contract', reason: 'Contract verification failed' };
-    }
-    this.logger.incrementPassed('check11_contract');
-    checksPassed++;
-
-    if (!this.check12_social(mintAddress)) {
-      this.logger.incrementRejected('check12_social');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check12_social', reason: 'Poor social signals' };
-    }
-    this.logger.incrementPassed('check12_social');
-    checksPassed++;
-
-    if (!this.check13_price(mintAddress)) {
-      this.logger.incrementRejected('check13_price');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check13_price', reason: 'Poor price action' };
-    }
-    this.logger.incrementPassed('check13_price');
-    checksPassed++;
-
-    if (!this.check14_volume(mintAddress)) {
-      this.logger.incrementRejected('check14_volume');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check14_volume', reason: 'Poor volume pattern' };
-    }
-    this.logger.incrementPassed('check14_volume');
-    checksPassed++;
-
-    if (!this.check15_whale(mintAddress)) {
-      this.logger.incrementRejected('check15_whale');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check15_whale', reason: 'Whale manipulation detected' };
-    }
-    this.logger.incrementPassed('check15_whale');
-    checksPassed++;
-
-    if (!this.check16_time(mintAddress)) {
-      this.logger.incrementRejected('check16_time');
-      return { passed: false, checksPassed, checksTotal, failedAt: 'check16_time', reason: 'Time-based filter failed' };
-    }
-    this.logger.incrementPassed('check16_time');
-    checksPassed++;
-
     this.logger.incrementOutput();
     return { passed: true, checksPassed, checksTotal };
   }
@@ -200,38 +144,6 @@ export class UnifiedPreFilter {
 
   private check8_zero(address: string): boolean {
     return !address.includes('11111111111111111111111111111111');
-  }
-
-  private check9_liquidity(_address: string): boolean {
-    return true;
-  }
-
-  private check10_holder(_address: string): boolean {
-    return true;
-  }
-
-  private check11_contract(_address: string): boolean {
-    return true;
-  }
-
-  private check12_social(_address: string): boolean {
-    return true;
-  }
-
-  private check13_price(_address: string): boolean {
-    return true;
-  }
-
-  private check14_volume(_address: string): boolean {
-    return true;
-  }
-
-  private check15_whale(_address: string): boolean {
-    return true;
-  }
-
-  private check16_time(_address: string): boolean {
-    return true;
   }
 
   public getLogger(): PreFilterLogger {

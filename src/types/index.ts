@@ -1,3 +1,10 @@
+export interface TokenEvent {
+  id: string;
+  mintAddress: string;
+  timestamp: number;
+  source: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   timestamp: number;
@@ -18,14 +25,6 @@ export interface PreFilterCounters {
     check6_patterns: number;
     check7_sequential: number;
     check8_zero: number;
-    check9_liquidity: number;
-    check10_holder: number;
-    check11_contract: number;
-    check12_social: number;
-    check13_price: number;
-    check14_volume: number;
-    check15_whale: number;
-    check16_time: number;
   };
   rejected: {
     check1_length: number;
@@ -36,14 +35,6 @@ export interface PreFilterCounters {
     check6_patterns: number;
     check7_sequential: number;
     check8_zero: number;
-    check9_liquidity: number;
-    check10_holder: number;
-    check11_contract: number;
-    check12_social: number;
-    check13_price: number;
-    check14_volume: number;
-    check15_whale: number;
-    check16_time: number;
   };
   totalOutput: number;
   filterEfficiency: number;

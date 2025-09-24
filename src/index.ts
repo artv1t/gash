@@ -1,5 +1,7 @@
 import { SessionManager } from './logger/index';
 import { UnifiedPreFilter } from './prefilter/unifiedPreFilter';
+import { TokenDetector } from './detector/tokenDetector';
+import { EventBus } from './core/eventBus';
 
 async function main(): Promise<void> {
   console.log('🚀 Starting Solana Sniper Bot v2...');
@@ -13,36 +15,35 @@ async function main(): Promise<void> {
 
   const preFilter = new UnifiedPreFilter();
   const logger = preFilter.getLogger();
+  const tokenDetector = new TokenDetector();
+  const eventBus = EventBus.getInstance();
 
   console.log('✅ Logging system initialized');
   console.log('✅ Session isolation active');
   console.log('✅ Unified pre-filter ready');
+  console.log('✅ Token detector ready');
 
-  console.log('\n🧪 Testing unified pre-filter...');
-  
-  const testTokens = [
-    'So11111111111111111111111111111111111111112', // SOL (should be rejected)
-    '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', // Valid token
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC (should be rejected)
-    'invalid-address', // Invalid format
-    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', // Suspicious pattern
-  ];
-
-  for (const token of testTokens) {
-    const result = await preFilter.processToken(token);
+  eventBus.onTokenDetected(async (tokenEvent) => {
+    const result = await preFilter.processToken(tokenEvent.mintAddress);
     const status = result.passed ? '✅ PASSED' : '❌ REJECTED';
-    console.log(`${status} ${token.slice(0, 20)}... (${result.checksPassed}/${result.checksTotal} checks)`);
+    console.log(`${status} ${tokenEvent.mintAddress.slice(0, 20)}... (${result.checksPassed}/${result.checksTotal} checks)`);
     if (!result.passed) {
       console.log(`  └─ Failed at: ${result.failedAt} - ${result.reason}`);
     }
-  }
+  });
 
-  logger.saveCounters();
-  logger.printSummary();
+  tokenDetector.start();
+  console.log('🔍 Real token detection started - processing live blockchain data...');
+
+  setInterval(() => {
+    logger.saveCounters();
+    logger.printSummary();
+  }, 30000);
 
   process.on('SIGINT', () => {
     console.log('\n🛑 Shutting down gracefully...');
     
+    tokenDetector.stop();
     logger.saveCounters();
     
     const endedSession = sessionManager.endCurrentSession();
@@ -51,11 +52,12 @@ async function main(): Promise<void> {
       console.log(`⏰ Duration: ${Math.round((endedSession.endTime! - endedSession.startTime) / 1000)}s`);
     }
     
+    eventBus.destroy();
     console.log('✅ Shutdown complete');
     process.exit(0);
   });
 
-  console.log('\n🎯 Pre-filter testing complete. Press Ctrl+C to stop.');
+  console.log('\n🎯 Bot running continuously. Press Ctrl+C to stop.');
   console.log('📁 Logs are saved in: ./logs/sessions/');
   console.log('🔗 Current session logs: ./logs/current_session_*.log');
 }
