@@ -2,6 +2,7 @@ import { SessionManager } from './logger/index';
 import { UnifiedPreFilter } from './prefilter/unifiedPreFilter';
 import { TokenDetector } from './detector/tokenDetector';
 import { EventBus } from './core/eventBus';
+import { RPCFilterPipeline } from './rpc-filters/index';
 
 async function main(): Promise<void> {
   console.log('🚀 Starting Solana Sniper Bot v2...');
@@ -17,18 +18,34 @@ async function main(): Promise<void> {
   const logger = preFilter.getLogger();
   const tokenDetector = new TokenDetector();
   const eventBus = EventBus.getInstance();
+  const rpcFilters = new RPCFilterPipeline();
 
   console.log('✅ Logging system initialized');
   console.log('✅ Session isolation active');
   console.log('✅ Unified pre-filter ready');
+  console.log('✅ RPC filters ready');
   console.log('✅ Token detector ready');
 
   eventBus.onTokenDetected(async (tokenEvent) => {
-    const result = await preFilter.processToken(tokenEvent.mintAddress);
-    const status = result.passed ? '✅ PASSED' : '❌ REJECTED';
-    console.log(`📊 PRE-FILTER EXIT: ${status} ${tokenEvent.mintAddress.slice(0, 20)}... (${result.checksPassed}/${result.checksTotal} checks)`);
-    if (!result.passed) {
-      console.log(`  └─ Failed at: ${result.failedAt} - ${result.reason}`);
+    const preFilterResult = await preFilter.processToken(tokenEvent.mintAddress);
+    const status = preFilterResult.passed ? '✅ PASSED' : '❌ REJECTED';
+    console.log(`📊 PRE-FILTER EXIT: ${status} ${tokenEvent.mintAddress} (${preFilterResult.checksPassed}/${preFilterResult.checksTotal} checks)`);
+    
+    if (!preFilterResult.passed) {
+      console.log(`  └─ Failed at: ${preFilterResult.failedAt} - ${preFilterResult.reason}`);
+      return;
+    }
+
+    console.log(`🔄 STAGE 2→3 TRANSITION: Processing ${tokenEvent.mintAddress} through RPC filters...`);
+    
+    const rpcResult = await rpcFilters.processToken(tokenEvent.mintAddress);
+    const rpcStatus = rpcResult.passed ? '✅ PASSED' : '❌ REJECTED';
+    console.log(`📊 RPC-FILTER EXIT: ${rpcStatus} ${tokenEvent.mintAddress} (Score: ${rpcResult.score.toFixed(2)}, Latency: ${rpcResult.latency}ms)`);
+    
+    if (!rpcResult.passed) {
+      console.log(`  └─ Failed: ${rpcResult.reason}`);
+    } else {
+      console.log(`  └─ Ready for trading: ${tokenEvent.mintAddress}`);
     }
   });
 

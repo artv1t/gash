@@ -7,7 +7,6 @@ export class TokenDetector {
   private connection: Connection;
   private eventBus: EventBus;
   private isRunning = false;
-  private lastProcessedSlot = 0;
 
   constructor() {
     this.connection = new Connection(config.rpc.heliusUrl, 'confirmed');
@@ -63,7 +62,6 @@ export class TokenDetector {
   private async getRecentTokenMints(): Promise<string[]> {
     try {
       const slot = await this.connection.getSlot();
-      if (slot <= this.lastProcessedSlot) return [];
       
       const block = await this.connection.getBlock(slot, {
         maxSupportedTransactionVersion: 0,
@@ -79,13 +77,20 @@ export class TokenDetector {
         if (transaction.meta?.err) continue;
         
         try {
+          const instructions = transaction.transaction.message.compiledInstructions;
           const accountKeys = transaction.transaction.message.getAccountKeys();
-          for (let i = 0; i < accountKeys.length; i++) {
-            const key = accountKeys.get(i);
-            if (key) {
-              const address = key.toString();
-              if (this.isValidMintAddress(address) && this.isPotentialMintPattern(address)) {
-                potentialTokens.push(address);
+          
+          for (const instruction of instructions) {
+            const programId = accountKeys.get(instruction.programIdIndex);
+            if (programId && this.isTokenRelatedProgram(programId.toString())) {
+              for (const accountIndex of instruction.accountKeyIndexes) {
+                const key = accountKeys.get(accountIndex);
+                if (key) {
+                  const address = key.toString();
+                  if (this.isValidMintAddress(address) && this.isPotentialMintPattern(address)) {
+                    potentialTokens.push(address);
+                  }
+                }
               }
             }
           }
@@ -94,7 +99,9 @@ export class TokenDetector {
         }
       }
       
-      const uniqueAddresses = [...new Set(potentialTokens)].slice(0, 5);
+      console.log(`🔍 Found ${potentialTokens.length} potential tokens, checking ${Math.min(potentialTokens.length, 20)} addresses`);
+      
+      const uniqueAddresses = [...new Set(potentialTokens)].slice(0, 20);
       const verifiedTokens: string[] = [];
       
       for (const address of uniqueAddresses) {
@@ -102,13 +109,14 @@ export class TokenDetector {
           if (await this.isTokenMint(address)) {
             verifiedTokens.push(address);
           }
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 50));
         } catch (error) {
           continue;
         }
       }
       
-      this.lastProcessedSlot = slot;
+      console.log(`✅ Verified ${verifiedTokens.length} real tokens from ${uniqueAddresses.length} checked`);
+      
       return verifiedTokens;
     } catch (error) {
       console.error('Error getting recent token mints:', error);
@@ -139,21 +147,44 @@ export class TokenDetector {
     }
   }
 
-  private isPotentialMintPattern(address: string): boolean {
+  private isTokenRelatedProgram(programId: string): boolean {
+    const tokenPrograms = new Set([
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+      'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+    ]);
     
+    return tokenPrograms.has(programId);
+  }
+
+  private isPotentialMintPattern(address: string): boolean {
     const skipPatterns = [
-      /^11111111111111111111111111111111/, // System program
-      /^TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA/, // Token program
-      /^ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL/, // Associated token program
-      /^SysvarRent111111111111111111111111111111111/, // Sysvar rent
-      /^SysvarC1ock11111111111111111111111111111111/, // Sysvar clock
+      /^11111111111111111111111111111111/,
+      /^TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA/,
+      /^ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL/,
+      /^SysvarRent111111111111111111111111111111111/,
+      /^SysvarC1ock11111111111111111111111111111111/,
+      /^ComputeBudget111111111111111111111111111111/,
+      /^Vote111111111111111111111111111111111111111/,
+      /^Stake11111111111111111111111111111111111111/,
     ];
     
     for (const pattern of skipPatterns) {
       if (pattern.test(address)) return false;
     }
     
-    return address.length >= 32 && address.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address);
+    if (address.length < 32 || address.length > 44) return false;
+    if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(address)) return false;
+    
+    const charCounts = new Map<string, number>();
+    for (const char of address) {
+      charCounts.set(char, (charCounts.get(char) || 0) + 1);
+    }
+    
+    const maxCharCount = Math.max(...charCounts.values());
+    if (maxCharCount > address.length * 0.6) return false;
+    
+    return true;
   }
 
   private async isTokenMint(address: string): Promise<boolean> {
