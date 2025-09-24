@@ -73,7 +73,7 @@ export class TokenDetector {
       
       if (!block) return [];
       
-      const tokens: string[] = [];
+      const potentialTokens: string[] = [];
       
       for (const transaction of block.transactions) {
         if (transaction.meta?.err) continue;
@@ -84,8 +84,8 @@ export class TokenDetector {
             const key = accountKeys.get(i);
             if (key) {
               const address = key.toString();
-              if (this.isValidMintAddress(address)) {
-                tokens.push(address);
+              if (this.isValidMintAddress(address) && this.isPotentialMintPattern(address)) {
+                potentialTokens.push(address);
               }
             }
           }
@@ -94,8 +94,22 @@ export class TokenDetector {
         }
       }
       
+      const uniqueAddresses = [...new Set(potentialTokens)].slice(0, 5);
+      const verifiedTokens: string[] = [];
+      
+      for (const address of uniqueAddresses) {
+        try {
+          if (await this.isTokenMint(address)) {
+            verifiedTokens.push(address);
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error) {
+          continue;
+        }
+      }
+      
       this.lastProcessedSlot = slot;
-      return [...new Set(tokens)];
+      return verifiedTokens;
     } catch (error) {
       console.error('Error getting recent token mints:', error);
       return [];
@@ -112,6 +126,8 @@ export class TokenDetector {
         '11111111111111111111111111111111',
         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
       ]);
       
       if (systemAddresses.has(address)) return false;
@@ -119,6 +135,41 @@ export class TokenDetector {
       new PublicKey(address);
       return true;
     } catch {
+      return false;
+    }
+  }
+
+  private isPotentialMintPattern(address: string): boolean {
+    
+    const skipPatterns = [
+      /^11111111111111111111111111111111/, // System program
+      /^TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA/, // Token program
+      /^ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL/, // Associated token program
+      /^SysvarRent111111111111111111111111111111111/, // Sysvar rent
+      /^SysvarC1ock11111111111111111111111111111111/, // Sysvar clock
+    ];
+    
+    for (const pattern of skipPatterns) {
+      if (pattern.test(address)) return false;
+    }
+    
+    return address.length >= 32 && address.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address);
+  }
+
+  private async isTokenMint(address: string): Promise<boolean> {
+    try {
+      const accountInfo = await this.connection.getAccountInfo(new PublicKey(address));
+      
+      if (!accountInfo) return false;
+      
+      const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+      
+      return (
+        accountInfo.owner.toString() === TOKEN_PROGRAM_ID &&
+        accountInfo.data.length === 82 &&
+        !accountInfo.executable
+      );
+    } catch (error) {
       return false;
     }
   }
