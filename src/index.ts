@@ -3,6 +3,7 @@ import { UnifiedPreFilter } from './prefilter/unifiedPreFilter';
 import { TokenDetector } from './detector/tokenDetector';
 import { EventBus } from './core/eventBus';
 import { RPCFilterPipeline } from './rpc-filters/index';
+import { TokenJourneyLogger } from './logger/tokenJourneyLogger';
 
 async function main(): Promise<void> {
   console.log('🚀 Starting Solana Sniper Bot v2...');
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
   const tokenDetector = new TokenDetector();
   const eventBus = EventBus.getInstance();
   const rpcFilters = new RPCFilterPipeline();
+  const journeyLogger = new TokenJourneyLogger();
 
   console.log('✅ Logging system initialized');
   console.log('✅ Session isolation active');
@@ -28,24 +30,34 @@ async function main(): Promise<void> {
 
   eventBus.onTokenDetected(async (tokenEvent) => {
     const preFilterResult = await preFilter.processToken(tokenEvent.mintAddress);
-    const status = preFilterResult.passed ? '✅ PASSED' : '❌ REJECTED';
-    console.log(`📊 PRE-FILTER EXIT: ${status} ${tokenEvent.mintAddress} (${preFilterResult.checksPassed}/${preFilterResult.checksTotal} checks)`);
+    
+    journeyLogger.logTokenJourney({
+      tokenAddress: tokenEvent.mintAddress,
+      timestamp: Date.now(),
+      stage: 'prefilter_exit',
+      status: preFilterResult.passed ? 'PASSED' : 'REJECTED',
+      reason: preFilterResult.passed 
+        ? `Passed ${preFilterResult.checksPassed}/${preFilterResult.checksTotal} checks`
+        : `Failed at: ${preFilterResult.failedAt} - ${preFilterResult.reason}`,
+      data: {
+        checksPassed: preFilterResult.checksPassed,
+        checksTotal: preFilterResult.checksTotal,
+        failedAt: preFilterResult.failedAt
+      }
+    });
     
     if (!preFilterResult.passed) {
-      console.log(`  └─ Failed at: ${preFilterResult.failedAt} - ${preFilterResult.reason}`);
       return;
     }
 
     console.log(`🔄 STAGE 2→3 TRANSITION: Processing ${tokenEvent.mintAddress} through RPC filters...`);
     
     const rpcResult = await rpcFilters.processToken(tokenEvent.mintAddress);
-    const rpcStatus = rpcResult.passed ? '✅ PASSED' : '❌ REJECTED';
-    console.log(`📊 RPC-FILTER EXIT: ${rpcStatus} ${tokenEvent.mintAddress} (Score: ${rpcResult.score.toFixed(2)}, Latency: ${rpcResult.latency}ms)`);
     
     if (!rpcResult.passed) {
-      console.log(`  └─ Failed: ${rpcResult.reason}`);
+      console.log(`❌ RPC-FILTER FINAL: REJECTED ${tokenEvent.mintAddress} - ${rpcResult.reason}`);
     } else {
-      console.log(`  └─ Ready for trading: ${tokenEvent.mintAddress}`);
+      console.log(`✅ RPC-FILTER FINAL: PASSED ${tokenEvent.mintAddress} - Ready for trading!`);
     }
   });
 
@@ -55,6 +67,7 @@ async function main(): Promise<void> {
   setInterval(() => {
     logger.saveCounters();
     logger.printSummary();
+    journeyLogger.printJourneySummary();
   }, 30000);
 
   process.on('SIGINT', () => {
