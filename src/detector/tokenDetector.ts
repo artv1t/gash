@@ -3,6 +3,15 @@ import { TokenEvent } from '../types/index';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const SYSTEM_ADDRESSES = new Set([
+  'So11111111111111111111111111111111111111112',
+  '11111111111111111111111111111111',
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+]);
+
 interface TokenQueueItem {
   mintAddress: string;
   timestamp: number;
@@ -125,6 +134,7 @@ export class TokenDetector {
     
     this.startDexPoolMonitoring();
     this.startQueueProcessor();
+    this.startMemoryCleanup();
   }
 
   public stop(): void {
@@ -138,13 +148,23 @@ export class TokenDetector {
       if (!this.isRunning) return;
       try {
         await this.fetchDexScreenerTokens();
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        await this.fetchRaydiumPairs();
       } catch (error) {
-        console.error('DEX Pool monitoring error:', error);
-        this.logToFile({ event: 'monitoring_error', error: error instanceof Error ? error.message : 'Unknown error' });
+        console.error('DexScreener monitoring error:', error);
+        this.logToFile({ event: 'dexscreener_error', error: error instanceof Error ? error.message : 'Unknown error' });
       }
-    }, 15000);
+    }, 12000);
+    
+    setTimeout(() => {
+      setInterval(async () => {
+        if (!this.isRunning) return;
+        try {
+          await this.fetchRaydiumPairs();
+        } catch (error) {
+          console.error('Raydium monitoring error:', error);
+          this.logToFile({ event: 'raydium_error', error: error instanceof Error ? error.message : 'Unknown error' });
+        }
+      }, 20000);
+    }, 6000); // 6 second offset to stagger requests
   }
 
   private startQueueProcessor(): void {
@@ -173,24 +193,34 @@ export class TokenDetector {
         
         this.eventBus.emitTokenEvent(tokenEvent);
       }
-    }, 2000);
+    }, 1500);
   }
 
   private async fetchDexScreenerTokens(): Promise<void> {
-    try {
-      console.log('🔍 Fetching quality tokens from DexScreener API...');
-      
-      const response = await fetch(this.dexScreenerApiUrl, {
-        method: 'GET',
-        headers: { 
-          'Accept': 'application/json',
-          'User-Agent': 'Solana-Sniper-Bot/1.0'
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    while (retryCount < maxRetries) {
+      try {
+        console.log('🔍 Fetching quality tokens from DexScreener API...');
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(this.dexScreenerApiUrl, {
+          method: 'GET',
+          headers: { 
+            'Accept': 'application/json',
+            'User-Agent': 'Solana-Sniper-Bot/1.0'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`DexScreener API error: ${response.status} ${response.statusText}`);
         }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`DexScreener API error: ${response.status} ${response.statusText}`);
-      }
       
       const data = await response.json();
       const pairs: DexScreenerPair[] = data.pairs || [];
@@ -247,31 +277,50 @@ export class TokenDetector {
         }
       }
       
-    } catch (error) {
-      console.error('DexScreener API fetch error:', error);
-      this.logToFile({ 
-        event: 'dexscreener_api_error', 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: Date.now()
-      });
+        break; // Success, exit retry loop
+      } catch (error) {
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          console.error('DexScreener API fetch failed after retries:', error);
+          this.logToFile({ 
+            event: 'dexscreener_api_error', 
+            error: error instanceof Error ? error.message : 'Unknown error',
+            retries: retryCount,
+            timestamp: Date.now()
+          });
+        } else {
+          console.warn(`DexScreener API retry ${retryCount}/${maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+        }
+      }
     }
   }
 
   private async fetchRaydiumPairs(): Promise<void> {
-    try {
-      console.log('🔍 Fetching established pairs from Raydium API...');
-      
-      const response = await fetch(this.raydiumApiUrl, {
-        method: 'GET',
-        headers: { 
-          'Accept': 'application/json',
-          'User-Agent': 'Solana-Sniper-Bot/1.0'
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    while (retryCount < maxRetries) {
+      try {
+        console.log('🔍 Fetching established pairs from Raydium API...');
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(this.raydiumApiUrl, {
+          method: 'GET',
+          headers: { 
+            'Accept': 'application/json',
+            'User-Agent': 'Solana-Sniper-Bot/1.0'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`Raydium API error: ${response.status} ${response.statusText}`);
         }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Raydium API error: ${response.status} ${response.statusText}`);
-      }
       
       const pairs: RaydiumPair[] = await response.json();
       
@@ -317,19 +366,28 @@ export class TokenDetector {
       
       console.log(`✅ Found ${qualityCount} quality Raydium pairs`);
       
-    } catch (error) {
-      console.error('Raydium API fetch error:', error);
-      this.logToFile({ 
-        event: 'raydium_api_error', 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: Date.now()
-      });
+        break; // Success, exit retry loop
+      } catch (error) {
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          console.error('Raydium API fetch failed after retries:', error);
+          this.logToFile({ 
+            event: 'raydium_api_error', 
+            error: error instanceof Error ? error.message : 'Unknown error',
+            retries: retryCount,
+            timestamp: Date.now()
+          });
+        } else {
+          console.warn(`Raydium API retry ${retryCount}/${maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+        }
+      }
     }
   }
 
   private isQualityDexScreenerPair(pair: DexScreenerPair): boolean {
     try {
-      if (!pair.baseToken.address || typeof pair.baseToken.address !== 'string') {
+      if (!pair.baseToken?.address || typeof pair.baseToken.address !== 'string') {
         return false;
       }
       
@@ -337,34 +395,35 @@ export class TokenDetector {
         return false;
       }
       
-      const systemAddresses = new Set([
-        'So11111111111111111111111111111111111111112',
-        '11111111111111111111111111111111',
-        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-        'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
-      ]);
-      
-      if (systemAddresses.has(pair.baseToken.address)) {
+      if (SYSTEM_ADDRESSES.has(pair.baseToken.address)) {
         return false;
       }
       
-      if (pair.volume.h24 < 1000) {
+      if (!pair.volume?.h24 || pair.volume.h24 < 1000) {
         return false;
       }
       
-      if (!pair.liquidity || pair.liquidity.usd < 10000) {
+      if (!pair.liquidity?.usd || pair.liquidity.usd < 10000) {
         return false;
       }
       
+      if (!pair.pairCreatedAt) {
+        return false;
+      }
       const ageMs = Date.now() - pair.pairCreatedAt;
-      if (ageMs < 1800000) {
+      if (ageMs < 1800000) { // 30 minutes
         return false;
       }
       
+      if (!pair.txns?.h24) {
+        return false;
+      }
       const totalTxns = pair.txns.h24.buys + pair.txns.h24.sells;
       if (totalTxns < 20) {
+        return false;
+      }
+      
+      if (!pair.priceUsd || parseFloat(pair.priceUsd) < 0.0001) {
         return false;
       }
       
@@ -384,16 +443,7 @@ export class TokenDetector {
         return false;
       }
       
-      const systemAddresses = new Set([
-        'So11111111111111111111111111111111111111112',
-        '11111111111111111111111111111111',
-        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-        'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
-      ]);
-      
-      if (systemAddresses.has(pair.baseMint)) {
+      if (SYSTEM_ADDRESSES.has(pair.baseMint)) {
         return false;
       }
       
@@ -461,5 +511,15 @@ export class TokenDetector {
       dexScreenerEndpoint: this.dexScreenerApiUrl,
       raydiumEndpoint: this.raydiumApiUrl
     };
+  }
+
+  private startMemoryCleanup(): void {
+    setInterval(() => {
+      if (this.processedTokens.size > 10000) {
+        this.processedTokens.clear();
+        console.log('🧹 Cleared processed tokens cache to prevent memory leak');
+        this.logToFile({ event: 'memory_cleanup', clearedTokens: this.processedTokens.size });
+      }
+    }, 600000); // 10 minutes
   }
 }
