@@ -21,7 +21,7 @@ async function main(): Promise<void> {
 
   console.log('✅ Logging system initialized');
   console.log('✅ Session isolation active');
-  console.log('✅ DEX pool monitoring ready');
+  console.log('✅ Jupiter API token monitoring ready');
   console.log('✅ RPC filters ready');
   console.log('✅ Token detector ready');
 
@@ -52,11 +52,12 @@ async function main(): Promise<void> {
   });
 
   tokenDetector.start();
-  console.log('🔍 DEX pool monitoring started - Raydium, Orca, DexScreener...');
+  console.log('🔍 Jupiter API token monitoring started - Recent tokens with liquidity...');
 
   setInterval(() => {
-    const queueStatus = tokenDetector.getQueueStatus();
-    console.log(`📊 QUEUE STATUS: ${queueStatus.size}/${queueStatus.maxSize} queued, ${queueStatus.processed} processed`);
+    const stats = tokenDetector.getStats();
+    console.log(`📊 JUPITER DETECTOR STATUS: ${stats.queueSize}/${stats.maxQueueSize} queued, ${stats.processedTokens} processed`);
+    console.log(`🔗 API: ${stats.apiEndpoint} | Running: ${stats.isRunning ? '✅' : '❌'}`);
     journeyLogger.printJourneySummary();
   }, 30000);
 
@@ -77,8 +78,9 @@ async function main(): Promise<void> {
   });
 
   console.log('\n🎯 Bot running continuously. Press Ctrl+C to stop.');
-  console.log('📁 TokenDetector logs: ./logs/token_detector/');
+  console.log('📁 Jupiter TokenDetector logs: ./logs/token_detector/');
   console.log('📁 Journey logs: ./logs/sessions/');
+  console.log('🔗 Jupiter API: https://lite-api.jup.ag/tokens/v2/recent');
 }
 
 process.on('unhandledRejection', (reason, promise) => {

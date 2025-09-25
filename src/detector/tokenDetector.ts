@@ -1,7 +1,5 @@
-import { Connection, PublicKey, GetProgramAccountsFilter } from '@solana/web3.js';
 import { EventBus } from '../core/eventBus';
 import { TokenEvent } from '../types/index';
-import { config } from '../config/index';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -9,20 +7,32 @@ interface TokenQueueItem {
   mintAddress: string;
   timestamp: number;
   source: string;
-  poolAddress?: string;
+  tokenData?: any;
+}
+
+interface JupiterTokenData {
+  id: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  liquidity?: number;
+  mcap?: number;
+  organicScore: number;
+  organicScoreLabel: string;
+  isVerified?: boolean;
+  updatedAt: string;
 }
 
 export class TokenDetector {
-  private connection: Connection;
   private eventBus: EventBus;
   private isRunning = false;
   private tokenQueue: TokenQueueItem[] = [];
-  private maxQueueSize = 50;
+  private maxQueueSize = 100;
   private logFile!: string;
   private processedTokens = new Set<string>();
+  private jupiterApiUrl = 'https://lite-api.jup.ag/tokens/v2/recent';
 
   constructor() {
-    this.connection = new Connection(config.rpc.heliusUrl, 'confirmed');
     this.eventBus = EventBus.getInstance();
     this.initializeLogging();
   }
@@ -34,16 +44,18 @@ export class TokenDetector {
     }
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.logFile = path.join(logDir, `token_detector_${timestamp}.log`);
+    this.logFile = path.join(logDir, `jupiter_token_detector_${timestamp}.log`);
     
     const header = {
-      session: `token_detector_${Date.now()}`,
+      session: `jupiter_token_detector_${Date.now()}`,
       startTime: new Date().toISOString(),
-      description: 'Real DEX pool token detection - Raydium & Orca pools'
+      description: 'Jupiter API token detection - Recent tokens with liquidity',
+      apiEndpoint: this.jupiterApiUrl,
+      queueSize: this.maxQueueSize
     };
     
     fs.writeFileSync(this.logFile, JSON.stringify(header, null, 2) + '\n');
-    console.log(`📁 TokenDetector logs: ${this.logFile}`);
+    console.log(`📁 Jupiter TokenDetector logs: ${this.logFile}`);
   }
 
   private logToFile(data: any): void {
@@ -57,31 +69,29 @@ export class TokenDetector {
   public start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
-    console.log('🔍 TokenDetector: Starting DEX pool monitoring...');
-    this.logToFile({ event: 'detector_started', message: 'DEX pool monitoring started' });
+    console.log('🔍 TokenDetector: Starting Jupiter API token monitoring...');
+    this.logToFile({ event: 'detector_started', message: 'Jupiter API token monitoring started' });
     
-    this.startPoolMonitoring();
+    this.startJupiterMonitoring();
     this.startQueueProcessor();
   }
 
   public stop(): void {
     this.isRunning = false;
     console.log('🛑 TokenDetector: Stopped');
-    this.logToFile({ event: 'detector_stopped', message: 'DEX pool monitoring stopped' });
+    this.logToFile({ event: 'detector_stopped', message: 'Jupiter API token monitoring stopped' });
   }
 
-  private startPoolMonitoring(): void {
+  private startJupiterMonitoring(): void {
     setInterval(async () => {
       if (!this.isRunning) return;
       try {
-        await this.scanRaydiumPools();
-        await this.scanOrcaPools();
-        await this.scanDexScreenerFeed();
+        await this.fetchJupiterRecentTokens();
       } catch (error) {
-        console.error('Pool monitoring error:', error);
+        console.error('Jupiter API monitoring error:', error);
         this.logToFile({ event: 'monitoring_error', error: error instanceof Error ? error.message : 'Unknown error' });
       }
-    }, 5000);
+    }, 10000);
   }
 
   private startQueueProcessor(): void {
@@ -97,12 +107,12 @@ export class TokenDetector {
           event: 'token_processing',
           mintAddress: token.mintAddress,
           source: token.source,
-          poolAddress: token.poolAddress,
+          tokenData: token.tokenData,
           queueSize: this.tokenQueue.length
         });
         
         const tokenEvent: TokenEvent = {
-          id: `pool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: `jupiter_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           mintAddress: token.mintAddress,
           timestamp: token.timestamp,
           source: token.source,
@@ -110,151 +120,95 @@ export class TokenDetector {
         
         this.eventBus.emitTokenEvent(tokenEvent);
       }
-    }, 1000);
+    }, 2000);
   }
 
-  private async scanRaydiumPools(): Promise<void> {
+  private async fetchJupiterRecentTokens(): Promise<void> {
     try {
-      const RAYDIUM_AMM_PROGRAM = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
+      console.log('🔍 Fetching recent tokens from Jupiter API...');
       
-      const filters: GetProgramAccountsFilter[] = [
-        { dataSize: 752 },
-        { memcmp: { offset: 400, bytes: '1' } }
-      ];
-      
-      const accounts = await this.connection.getProgramAccounts(
-        new PublicKey(RAYDIUM_AMM_PROGRAM),
-        { filters, commitment: 'confirmed' }
-      );
-      
-      console.log(`🔍 Found ${accounts.length} Raydium pools`);
-      
-      for (const account of accounts.slice(0, 10)) {
-        try {
-          const poolData = account.account.data;
-          const baseMint = new PublicKey(poolData.slice(400, 432)).toString();
-          const quoteMint = new PublicKey(poolData.slice(432, 464)).toString();
-          
-          for (const mint of [baseMint, quoteMint]) {
-            if (await this.isValidTokenMint(mint)) {
-              this.addToQueue({
-                mintAddress: mint,
-                timestamp: Date.now(),
-                source: 'raydium_pool',
-                poolAddress: account.pubkey.toString()
-              });
-            }
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 100));
-        } catch (error) {
-          continue;
-        }
-      }
-    } catch (error) {
-      console.error('Raydium scan error:', error);
-      this.logToFile({ event: 'raydium_scan_error', error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  }
-
-  private async scanOrcaPools(): Promise<void> {
-    try {
-      const ORCA_WHIRLPOOL_PROGRAM = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
-      
-      const filters: GetProgramAccountsFilter[] = [
-        { dataSize: 653 }
-      ];
-      
-      const accounts = await this.connection.getProgramAccounts(
-        new PublicKey(ORCA_WHIRLPOOL_PROGRAM),
-        { filters, commitment: 'confirmed' }
-      );
-      
-      console.log(`🔍 Found ${accounts.length} Orca pools`);
-      
-      for (const account of accounts.slice(0, 5)) {
-        try {
-          const poolData = account.account.data;
-          const tokenMintA = new PublicKey(poolData.slice(101, 133)).toString();
-          const tokenMintB = new PublicKey(poolData.slice(181, 213)).toString();
-          
-          for (const mint of [tokenMintA, tokenMintB]) {
-            if (await this.isValidTokenMint(mint)) {
-              this.addToQueue({
-                mintAddress: mint,
-                timestamp: Date.now(),
-                source: 'orca_pool',
-                poolAddress: account.pubkey.toString()
-              });
-            }
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 150));
-        } catch (error) {
-          continue;
-        }
-      }
-    } catch (error) {
-      console.error('Orca scan error:', error);
-      this.logToFile({ event: 'orca_scan_error', error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  }
-
-  private async scanDexScreenerFeed(): Promise<void> {
-    try {
-      const response = await fetch('https://api.dexscreener.com/latest/dex/tokens/solana', {
+      const response = await fetch(this.jupiterApiUrl, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers: { 
+          'Accept': 'application/json',
+          'User-Agent': 'Solana-Sniper-Bot/1.0'
+        }
       });
       
-      if (!response.ok) return;
+      if (!response.ok) {
+        throw new Error(`Jupiter API error: ${response.status} ${response.statusText}`);
+      }
       
-      const data = await response.json();
-      const pairs = data.pairs?.slice(0, 10) || [];
+      const tokens: JupiterTokenData[] = await response.json();
       
-      console.log(`🔍 Found ${pairs.length} DexScreener tokens`);
+      console.log(`🎯 Jupiter API returned ${tokens.length} recent tokens`);
+      this.logToFile({
+        event: 'jupiter_api_response',
+        tokensCount: tokens.length,
+        timestamp: Date.now()
+      });
       
-      for (const pair of pairs) {
-        if (pair.baseToken?.address) {
+      for (const token of tokens) {
+        this.logToFile({
+          event: 'jupiter_token_received',
+          tokenId: token.id,
+          symbol: token.symbol,
+          name: token.name,
+          liquidity: token.liquidity,
+          mcap: token.mcap,
+          organicScore: token.organicScore,
+          organicScoreLabel: token.organicScoreLabel,
+          isVerified: token.isVerified
+        });
+        
+        if (this.isValidJupiterToken(token)) {
           this.addToQueue({
-            mintAddress: pair.baseToken.address,
+            mintAddress: token.id,
             timestamp: Date.now(),
-            source: 'dexscreener_feed'
+            source: 'jupiter_recent_api',
+            tokenData: {
+              name: token.name,
+              symbol: token.symbol,
+              decimals: token.decimals,
+              liquidity: token.liquidity,
+              mcap: token.mcap,
+              organicScore: token.organicScore,
+              organicScoreLabel: token.organicScoreLabel,
+              isVerified: token.isVerified,
+              updatedAt: token.updatedAt
+            }
+          });
+        } else {
+          this.logToFile({
+            event: 'jupiter_token_rejected',
+            tokenId: token.id,
+            symbol: token.symbol,
+            reason: 'Failed validation checks'
           });
         }
-        
-        await new Promise(resolve => setTimeout(resolve, 200));
       }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
     } catch (error) {
-      console.error('DexScreener scan error:', error);
-      this.logToFile({ event: 'dexscreener_scan_error', error: error instanceof Error ? error.message : 'Unknown error' });
+      console.error('Jupiter API fetch error:', error);
+      this.logToFile({ 
+        event: 'jupiter_api_error', 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: Date.now()
+      });
     }
   }
 
-  private addToQueue(token: TokenQueueItem): void {
-    if (this.processedTokens.has(token.mintAddress)) return;
-    
-    if (this.tokenQueue.length >= this.maxQueueSize) {
-      const removed = this.tokenQueue.shift();
-      console.log(`⚠️ Queue full, removed: ${removed?.mintAddress}`);
-    }
-    
-    this.tokenQueue.push(token);
-    console.log(`📥 QUEUED: ${token.mintAddress} (${token.source}) - Queue: ${this.tokenQueue.length}/${this.maxQueueSize}`);
-    
-    this.logToFile({
-      event: 'token_queued',
-      mintAddress: token.mintAddress,
-      source: token.source,
-      poolAddress: token.poolAddress,
-      queueSize: this.tokenQueue.length
-    });
-  }
-
-  private async isValidTokenMint(address: string): Promise<boolean> {
+  private isValidJupiterToken(token: JupiterTokenData): boolean {
     try {
-      if (!address || typeof address !== 'string') return false;
-      if (address.length < 32 || address.length > 44) return false;
+      if (!token.id || typeof token.id !== 'string') {
+        return false;
+      }
+      
+      if (token.id.length < 32 || token.id.length > 44) {
+        return false;
+      }
       
       const systemAddresses = new Set([
         'So11111111111111111111111111111111111111112',
@@ -265,21 +219,44 @@ export class TokenDetector {
         'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
       ]);
       
-      if (systemAddresses.has(address)) return false;
+      if (systemAddresses.has(token.id)) {
+        return false;
+      }
       
-      const accountInfo = await this.connection.getAccountInfo(new PublicKey(address));
-      if (!accountInfo) return false;
+      if (token.liquidity !== undefined && token.liquidity < 50) {
+        return false;
+      }
       
-      const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-      
-      return (
-        accountInfo.owner.toString() === TOKEN_PROGRAM_ID &&
-        accountInfo.data.length === 82 &&
-        !accountInfo.executable
-      );
+      return true;
     } catch (error) {
       return false;
     }
+  }
+
+  private addToQueue(token: TokenQueueItem): void {
+    if (this.processedTokens.has(token.mintAddress)) return;
+    
+    if (this.tokenQueue.length >= this.maxQueueSize) {
+      const removed = this.tokenQueue.shift();
+      console.log(`⚠️ Queue full, removed: ${removed?.mintAddress}`);
+      this.logToFile({
+        event: 'token_queue_overflow',
+        removedToken: removed?.mintAddress,
+        queueSize: this.tokenQueue.length
+      });
+    }
+    
+    this.tokenQueue.push(token);
+    console.log(`📥 QUEUED: ${token.mintAddress} (${token.source}) - Queue: ${this.tokenQueue.length}/${this.maxQueueSize}`);
+    
+    this.logToFile({
+      event: 'token_queued',
+      mintAddress: token.mintAddress,
+      source: token.source,
+      tokenData: token.tokenData,
+      queueSize: this.tokenQueue.length,
+      timestamp: Date.now()
+    });
   }
 
   public getQueueStatus(): { size: number; maxSize: number; processed: number } {
@@ -287,6 +264,22 @@ export class TokenDetector {
       size: this.tokenQueue.length,
       maxSize: this.maxQueueSize,
       processed: this.processedTokens.size
+    };
+  }
+
+  public getStats(): { 
+    queueSize: number; 
+    maxQueueSize: number; 
+    processedTokens: number;
+    isRunning: boolean;
+    apiEndpoint: string;
+  } {
+    return {
+      queueSize: this.tokenQueue.length,
+      maxQueueSize: this.maxQueueSize,
+      processedTokens: this.processedTokens.size,
+      isRunning: this.isRunning,
+      apiEndpoint: this.jupiterApiUrl
     };
   }
 }
