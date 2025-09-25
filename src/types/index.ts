@@ -12,32 +12,16 @@ export interface SessionInfo {
   endTime?: number;
 }
 
-export interface PreFilterCounters {
+export interface TokenDetectorCounters {
   sessionId: string;
   timestamp: number;
-  totalInput: number;
-  passed: {
-    check1_length: number;
-    check2_base58: number;
-    check3_publickey: number;
-    check4_system: number;
-    check5_scam: number;
-    check6_patterns: number;
-    check7_sequential: number;
-    check8_zero: number;
-  };
-  rejected: {
-    check1_length: number;
-    check2_base58: number;
-    check3_publickey: number;
-    check4_system: number;
-    check5_scam: number;
-    check6_patterns: number;
-    check7_sequential: number;
-    check8_zero: number;
-  };
-  totalOutput: number;
-  filterEfficiency: number;
+  totalDetected: number;
+  raydiumTokens: number;
+  orcaTokens: number;
+  dexScreenerTokens: number;
+  queuedTokens: number;
+  processedTokens: number;
+  validTokens: number;
 }
 
 export interface RPCLogEntry {
@@ -76,7 +60,7 @@ export interface SessionMetrics {
   };
   filtering: {
     tokensDetected: number;
-    prefilterPassed: number;
+    queueProcessed: number;
     rpcFilterPassed: number;
     tradingExecuted: number;
     filterEfficiency: number;
@@ -89,11 +73,11 @@ export interface SessionMetrics {
   };
 }
 
-export interface PreFilterResult {
-  passed: boolean;
-  checksPassed: number;
-  checksTotal: number;
-  failedAt?: string;
+export interface TokenDetectorResult {
+  detected: boolean;
+  source: string;
+  poolAddress?: string;
+  timestamp: number;
   reason?: string;
 }
 

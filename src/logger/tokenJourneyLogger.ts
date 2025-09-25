@@ -5,7 +5,7 @@ import { SessionManager } from './sessionManager';
 export interface TokenJourneyEntry {
   tokenAddress: string;
   timestamp: number;
-  stage: 'prefilter_exit' | 'rpc_filter_entry' | 'route_gate' | 'onchain' | 'dex_screener' | 'final_result';
+  stage: 'detector_exit' | 'rpc_filter_entry' | 'route_gate' | 'onchain' | 'dex_screener' | 'final_result';
   status: 'PASSED' | 'REJECTED';
   reason?: string | undefined;
   score?: number | undefined;
@@ -77,7 +77,7 @@ export class TokenJourneyLogger {
 
   private getStageLabel(stage: string): string {
     const labels: Record<string, string> = {
-      'prefilter_exit': '📊 PRE-FILTER EXIT',
+      'detector_exit': '🎯 DETECTOR EXIT',
       'rpc_filter_entry': '🔄 RPC-FILTER ENTRY',
       'route_gate': '🚪 ROUTE-GATE FILTER',
       'onchain': '⛓️ ONCHAIN FILTER',
@@ -87,7 +87,7 @@ export class TokenJourneyLogger {
     return labels[stage] || stage.toUpperCase();
   }
 
-  public getTokensExitingPreFilter(): string[] {
+  public getTokensFromDetector(): string[] {
     try {
       const logContent = fs.readFileSync(this.logFile, 'utf8');
       const lines = logContent.split('\n').filter(line => line.trim());
@@ -96,7 +96,7 @@ export class TokenJourneyLogger {
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
-          if (entry.stage === 'prefilter_exit' && entry.status === 'PASSED') {
+          if (entry.stage === 'detector_exit' && entry.status === 'PASSED') {
             tokens.push(entry.tokenAddress);
           }
         } catch (e) {
@@ -112,14 +112,14 @@ export class TokenJourneyLogger {
   }
 
   public printJourneySummary(): void {
-    const tokens = this.getTokensExitingPreFilter();
+    const tokens = this.getTokensFromDetector();
     console.log('\n🎯 TOKEN JOURNEY SUMMARY:');
     console.log(`Session: ${this.sessionManager.getSessionId()}`);
-    console.log(`Tokens exiting pre-filter: ${tokens.length}`);
+    console.log(`Tokens from detector: ${tokens.length}`);
     console.log(`Log file: ${this.logFile}`);
     
     if (tokens.length > 0) {
-      console.log('\n📋 TOKENS THAT PASSED PRE-FILTER:');
+      console.log('\n📋 TOKENS FROM DETECTOR:');
       tokens.slice(-10).forEach((token, index) => {
         console.log(`${index + 1}. ${token}`);
       });

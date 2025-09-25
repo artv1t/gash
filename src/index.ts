@@ -1,12 +1,11 @@
 import { SessionManager } from './logger/index';
-import { UnifiedPreFilter } from './prefilter/unifiedPreFilter';
 import { TokenDetector } from './detector/tokenDetector';
 import { EventBus } from './core/eventBus';
 import { RPCFilterPipeline } from './rpc-filters/index';
 import { TokenJourneyLogger } from './logger/tokenJourneyLogger';
 
 async function main(): Promise<void> {
-  console.log('🚀 Starting Solana Sniper Bot v2...');
+  console.log('🚀 Starting Solana Sniper Bot v2 - DEX Pool Edition...');
   console.log('─'.repeat(50));
 
   const sessionManager = SessionManager.getInstance();
@@ -15,8 +14,6 @@ async function main(): Promise<void> {
   console.log(`📋 Session started: ${session.sessionId}`);
   console.log(`⏰ Start time: ${new Date(session.startTime).toLocaleString()}`);
 
-  const preFilter = new UnifiedPreFilter();
-  const logger = preFilter.getLogger();
   const tokenDetector = new TokenDetector();
   const eventBus = EventBus.getInstance();
   const rpcFilters = new RPCFilterPipeline();
@@ -24,33 +21,26 @@ async function main(): Promise<void> {
 
   console.log('✅ Logging system initialized');
   console.log('✅ Session isolation active');
-  console.log('✅ Unified pre-filter ready');
+  console.log('✅ DEX pool monitoring ready');
   console.log('✅ RPC filters ready');
   console.log('✅ Token detector ready');
 
   eventBus.onTokenDetected(async (tokenEvent) => {
-    const preFilterResult = await preFilter.processToken(tokenEvent.mintAddress);
+    console.log(`🎯 TOKEN FROM DETECTOR: ${tokenEvent.mintAddress} (${tokenEvent.source})`);
     
     journeyLogger.logTokenJourney({
       tokenAddress: tokenEvent.mintAddress,
       timestamp: Date.now(),
-      stage: 'prefilter_exit',
-      status: preFilterResult.passed ? 'PASSED' : 'REJECTED',
-      reason: preFilterResult.passed 
-        ? `Passed ${preFilterResult.checksPassed}/${preFilterResult.checksTotal} checks`
-        : `Failed at: ${preFilterResult.failedAt} - ${preFilterResult.reason}`,
+      stage: 'detector_exit',
+      status: 'PASSED',
+      reason: `Token from ${tokenEvent.source} - direct from DEX pools`,
       data: {
-        checksPassed: preFilterResult.checksPassed,
-        checksTotal: preFilterResult.checksTotal,
-        failedAt: preFilterResult.failedAt
+        source: tokenEvent.source,
+        detectorId: tokenEvent.id
       }
     });
-    
-    if (!preFilterResult.passed) {
-      return;
-    }
 
-    console.log(`🔄 STAGE 2→3 TRANSITION: Processing ${tokenEvent.mintAddress} through RPC filters...`);
+    console.log(`🔄 DETECTOR→RPC TRANSITION: Processing ${tokenEvent.mintAddress} through RPC filters...`);
     
     const rpcResult = await rpcFilters.processToken(tokenEvent.mintAddress);
     
@@ -62,11 +52,11 @@ async function main(): Promise<void> {
   });
 
   tokenDetector.start();
-  console.log('🔍 Real token detection started - processing live blockchain data...');
+  console.log('🔍 DEX pool monitoring started - Raydium, Orca, DexScreener...');
 
   setInterval(() => {
-    logger.saveCounters();
-    logger.printSummary();
+    const queueStatus = tokenDetector.getQueueStatus();
+    console.log(`📊 QUEUE STATUS: ${queueStatus.size}/${queueStatus.maxSize} queued, ${queueStatus.processed} processed`);
     journeyLogger.printJourneySummary();
   }, 30000);
 
@@ -74,7 +64,6 @@ async function main(): Promise<void> {
     console.log('\n🛑 Shutting down gracefully...');
     
     tokenDetector.stop();
-    logger.saveCounters();
     
     const endedSession = sessionManager.endCurrentSession();
     if (endedSession) {
@@ -88,8 +77,8 @@ async function main(): Promise<void> {
   });
 
   console.log('\n🎯 Bot running continuously. Press Ctrl+C to stop.');
-  console.log('📁 Logs are saved in: ./logs/sessions/');
-  console.log('🔗 Current session logs: ./logs/current_session_*.log');
+  console.log('📁 TokenDetector logs: ./logs/token_detector/');
+  console.log('📁 Journey logs: ./logs/sessions/');
 }
 
 process.on('unhandledRejection', (reason, promise) => {
